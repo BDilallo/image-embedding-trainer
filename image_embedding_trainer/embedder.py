@@ -12,6 +12,7 @@ class ImageEmbedder(nn.Module):
         self,
         model_name: str,
         embedding_dim: int,
+        in_channels: int = 3,
         pretrained: bool = False,
         weights_path: Optional[str | Path] = None,
     ) -> None:
@@ -22,6 +23,7 @@ class ImageEmbedder(nn.Module):
             pretrained=False,
             num_classes=0,
             global_pool="avg",
+            in_chans=in_channels,
         )
 
         if pretrained:

@@ -33,15 +33,16 @@ def _convert_paths_to_strings(value: Any) -> Any:
 def save_checkpoint(
     checkpoint_path: Path,
     model: nn.Module,
-    arcface_loss: nn.Module,
+    loss_fn: nn.Module,
     model_optimizer: Optimizer,
-    loss_optimizer: Optimizer,
+    loss_optimizer: Optional[Optimizer],
     model_scheduler: LRScheduler,
-    loss_scheduler: LRScheduler,
+    loss_scheduler: Optional[LRScheduler],
     epoch: int,
     class_to_idx: Dict[str, int],
     config: TrainConfig,
     metrics: Dict[str, float],
+    best_top1: float,
 ) -> None:
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,11 +52,15 @@ def save_checkpoint(
     checkpoint = {
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
-        "arcface_loss_state_dict": arcface_loss.state_dict(),
+        "loss_state_dict": loss_fn.state_dict(),
         "model_optimizer_state_dict": model_optimizer.state_dict(),
-        "loss_optimizer_state_dict": loss_optimizer.state_dict(),
+        "loss_optimizer_state_dict": (
+            loss_optimizer.state_dict() if loss_optimizer is not None else None
+        ),
         "model_scheduler_state_dict": model_scheduler.state_dict(),
-        "loss_scheduler_state_dict": loss_scheduler.state_dict(),
+        "loss_scheduler_state_dict": (
+            loss_scheduler.state_dict() if loss_scheduler is not None else None
+        ),
         "class_to_idx": class_to_idx,
         "idx_to_class": {
             class_index: class_name
@@ -63,6 +68,7 @@ def save_checkpoint(
         },
         "config": config_dict,
         "metrics": metrics,
+        "best_top1": best_top1,
     }
 
     torch.save(checkpoint, checkpoint_path)
@@ -72,7 +78,7 @@ def load_checkpoint(
     checkpoint_path: Path,
     model: nn.Module,
     device: torch.device,
-    arcface_loss: Optional[nn.Module] = None,
+    loss_fn: Optional[nn.Module] = None,
     model_optimizer: Optional[Optimizer] = None,
     loss_optimizer: Optional[Optimizer] = None,
     model_scheduler: Optional[LRScheduler] = None,
@@ -92,9 +98,9 @@ def load_checkpoint(
 
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    if arcface_loss is not None:
-        arcface_loss.load_state_dict(
-            checkpoint["arcface_loss_state_dict"]
+    if loss_fn is not None:
+        loss_fn.load_state_dict(
+            checkpoint["loss_state_dict"]
         )
 
     if model_optimizer is not None:
@@ -102,7 +108,7 @@ def load_checkpoint(
             checkpoint["model_optimizer_state_dict"]
         )
 
-    if loss_optimizer is not None:
+    if loss_optimizer is not None and checkpoint.get("loss_optimizer_state_dict") is not None:
         loss_optimizer.load_state_dict(
             checkpoint["loss_optimizer_state_dict"]
         )
@@ -112,7 +118,7 @@ def load_checkpoint(
             checkpoint["model_scheduler_state_dict"]
         )
 
-    if loss_scheduler is not None:
+    if loss_scheduler is not None and checkpoint.get("loss_scheduler_state_dict") is not None:
         loss_scheduler.load_state_dict(
             checkpoint["loss_scheduler_state_dict"]
         )

@@ -1,0 +1,27 @@
+[project]
+name = "image-embedding-trainer"
+version = "0.1.0"
+description = "Train an image embedding model using ArcFace loss."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "timm>=1.0.26",
+    "pytorch-metric-learning>=2.9.0",
+    "tqdm>=4.67.1",
+    "numpy>=2.2.6",
+    "Pillow>=11.2.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+image-embedding-trainer = "image_embedding_trainer.train:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["image_embedding_trainer*"]

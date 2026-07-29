@@ -82,6 +82,22 @@ def topk_retrieval_accuracy(
     return results
 
 
+def _pair_masks(labels: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Boolean masks over the upper triangle (excluding diagonal) selecting
+    same-class and different-class pairs, respectively."""
+
+    num_images = labels.size(0)
+
+    upper_triangle_mask = torch.triu(
+        torch.ones(num_images, num_images, dtype=torch.bool, device=labels.device),
+        diagonal=1,
+    )
+
+    same_class_mask = labels.unsqueeze(0) == labels.unsqueeze(1)
+
+    return upper_triangle_mask & same_class_mask, upper_triangle_mask & ~same_class_mask
+
+
 @torch.no_grad()
 def compute_pair_score_stats(
     embeddings: torch.Tensor,
@@ -89,21 +105,10 @@ def compute_pair_score_stats(
 ) -> Dict[str, float]:
 
     similarity_matrix = embeddings @ embeddings.T
-    num_images = similarity_matrix.size(0)
+    positive_mask, negative_mask = _pair_masks(labels)
 
-    positive_scores = []
-    negative_scores = []
-
-    for first_index in range(num_images):
-        for second_index in range(first_index + 1, num_images):
-            similarity_score = similarity_matrix[first_index, second_index].item()
-
-            same_class = labels[first_index].item() == labels[second_index].item()
-
-            if same_class:
-                positive_scores.append(similarity_score)
-            else:
-                negative_scores.append(similarity_score)
+    positive_scores = similarity_matrix[positive_mask]
+    negative_scores = similarity_matrix[negative_mask]
 
     positive_mean, positive_std = _mean_and_std(positive_scores)
     negative_mean, negative_std = _mean_and_std(negative_scores)
@@ -113,20 +118,20 @@ def compute_pair_score_stats(
         "pos_std": positive_std,
         "neg_mean": negative_mean,
         "neg_std": negative_std,
-        "num_pos_pairs": len(positive_scores),
-        "num_neg_pairs": len(negative_scores),
+        "num_pos_pairs": int(positive_mask.sum().item()),
+        "num_neg_pairs": int(negative_mask.sum().item()),
     }
 
 
-def _mean_and_std(values: List[float]) -> Tuple[float, float]:
+def _mean_and_std(values: torch.Tensor) -> Tuple[float, float]:
 
-    if not values:
+    if values.numel() == 0:
         return 0.0, 0.0
 
-    tensor_values = torch.tensor(values, dtype=torch.float32)
+    values = values.to(torch.float32)
 
-    mean = tensor_values.mean().item()
-    std = tensor_values.std(unbiased=False).item()
+    mean = values.mean().item()
+    std = values.std(unbiased=False).item()
 
     return mean, std
 
@@ -142,21 +147,11 @@ def find_best_threshold(
         thresholds = [value / 100.0 for value in range(10, 100)]
 
     similarity_matrix = embeddings @ embeddings.T
-    num_images = similarity_matrix.size(0)
+    positive_mask, negative_mask = _pair_masks(labels)
+    pair_mask = positive_mask | negative_mask
 
-    pair_scores = []
-    pair_targets = []
-
-    for first_index in range(num_images):
-        for second_index in range(first_index + 1, num_images):
-            similarity_score = similarity_matrix[first_index, second_index].item()
-            same_class = labels[first_index].item() == labels[second_index].item()
-
-            pair_scores.append(similarity_score)
-            pair_targets.append(1 if same_class else 0)
-
-    scores = torch.tensor(pair_scores, dtype=torch.float32)
-    targets = torch.tensor(pair_targets, dtype=torch.int64)
+    scores = similarity_matrix[pair_mask].to(torch.float32)
+    targets = positive_mask[pair_mask].long()
 
     best_result = {
         "threshold": 0.5,

@@ -5,7 +5,7 @@ from pytorch_metric_learning import losses
 from .config import TrainConfig
 
 
-def build_arcface_loss(
+def build_loss(
     num_classes: int,
     config: TrainConfig,
     device: torch.device,
@@ -13,7 +13,7 @@ def build_arcface_loss(
 
     if num_classes < 2:
         raise ValueError(
-            "ArcFace training requires at least two classes. "
+            "Metric-learning training requires at least two classes. "
             f"Found {num_classes}."
         )
 
@@ -22,11 +22,36 @@ def build_arcface_loss(
             "Embedding dimension must be greater than zero."
         )
 
-    arcface_loss = losses.ArcFaceLoss(
-        num_classes=num_classes,
-        embedding_size=config.embedding_dim,
-        margin=config.arcface_margin,
-        scale=config.arcface_scale,
-    )
+    loss_name = config.loss_name.lower()
 
-    return arcface_loss.to(device)
+    if loss_name == "arcface":
+        loss_fn = losses.ArcFaceLoss(
+            num_classes=num_classes,
+            embedding_size=config.embedding_dim,
+            margin=config.arcface_margin,
+            scale=config.arcface_scale,
+        )
+    elif loss_name == "subcenter_arcface":
+        loss_fn = losses.SubCenterArcFaceLoss(
+            num_classes=num_classes,
+            embedding_size=config.embedding_dim,
+            margin=config.arcface_margin,
+            scale=config.arcface_scale,
+            sub_centers=config.arcface_sub_centers,
+        )
+    elif loss_name == "triplet":
+        loss_fn = losses.TripletMarginLoss(
+            margin=config.triplet_margin,
+        )
+    elif loss_name == "contrastive":
+        loss_fn = losses.ContrastiveLoss(
+            pos_margin=config.contrastive_pos_margin,
+            neg_margin=config.contrastive_neg_margin,
+        )
+    else:
+        raise ValueError(
+            f"Unknown loss_name: {config.loss_name!r}. Expected one of: "
+            f"arcface, subcenter_arcface, triplet, contrastive."
+        )
+
+    return loss_fn.to(device)

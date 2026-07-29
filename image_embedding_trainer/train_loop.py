@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 from torch import nn
@@ -17,17 +17,17 @@ from .utils import save_json
 
 def train_one_epoch(
     model: nn.Module,
-    arcface_loss: nn.Module,
+    loss_fn: nn.Module,
     train_loader: DataLoader,
     model_optimizer: Optimizer,
-    loss_optimizer: Optimizer,
+    loss_optimizer: Optional[Optimizer],
     device: torch.device,
     scaler: torch.amp.GradScaler,
     use_amp: bool,
 ) -> float:
 
     model.train()
-    arcface_loss.train()
+    loss_fn.train()
 
     total_loss = 0.0
     amp_enabled = use_amp and device.type == "cuda"
@@ -43,19 +43,24 @@ def train_one_epoch(
         labels = labels.to(device, non_blocking=True)
 
         model_optimizer.zero_grad(set_to_none=True)
-        loss_optimizer.zero_grad(set_to_none=True)
+
+        if loss_optimizer is not None:
+            loss_optimizer.zero_grad(set_to_none=True)
 
         with torch.autocast(
             device_type=device.type,
             enabled=amp_enabled,
         ):
             embeddings = model(images)
-            loss = arcface_loss(embeddings, labels)
+            loss = loss_fn(embeddings, labels)
 
         scaler.scale(loss).backward()
 
         scaler.step(model_optimizer)
-        scaler.step(loss_optimizer)
+
+        if loss_optimizer is not None:
+            scaler.step(loss_optimizer)
+
         scaler.update()
 
         batch_size = images.size(0)
@@ -72,14 +77,14 @@ def train_one_epoch(
 
 def run_training(
     model: nn.Module,
-    arcface_loss: nn.Module,
+    loss_fn: nn.Module,
     train_dataset: ImageFolder,
     train_loader: DataLoader,
     val_loader: DataLoader,
     model_optimizer: Optimizer,
-    loss_optimizer: Optimizer,
+    loss_optimizer: Optional[Optimizer],
     model_scheduler: LRScheduler,
-    loss_scheduler: LRScheduler,
+    loss_scheduler: Optional[LRScheduler],
     config: TrainConfig,
     device: torch.device,
     start_epoch: int = 1,
@@ -106,7 +111,7 @@ def run_training(
 
         train_loss = train_one_epoch(
             model=model,
-            arcface_loss=arcface_loss,
+            loss_fn=loss_fn,
             train_loader=train_loader,
             model_optimizer=model_optimizer,
             loss_optimizer=loss_optimizer,
@@ -122,7 +127,9 @@ def run_training(
         )
 
         model_scheduler.step()
-        loss_scheduler.step()
+
+        if loss_scheduler is not None:
+            loss_scheduler.step()
 
         epoch_metrics = {
             "epoch": epoch,
@@ -146,10 +153,13 @@ def run_training(
             f"neg_mean={validation_metrics['neg_mean']:.4f}"
         )
 
+        if validation_metrics["top1"] > best_top1:
+            best_top1 = validation_metrics["top1"]
+
         save_checkpoint(
             checkpoint_path=last_checkpoint_path,
             model=model,
-            arcface_loss=arcface_loss,
+            loss_fn=loss_fn,
             model_optimizer=model_optimizer,
             loss_optimizer=loss_optimizer,
             model_scheduler=model_scheduler,
@@ -158,15 +168,14 @@ def run_training(
             class_to_idx=train_dataset.class_to_idx,
             config=config,
             metrics=epoch_metrics,
+            best_top1=best_top1,
         )
 
-        if validation_metrics["top1"] > best_top1:
-            best_top1 = validation_metrics["top1"]
-
+        if validation_metrics["top1"] == best_top1:
             save_checkpoint(
                 checkpoint_path=best_checkpoint_path,
                 model=model,
-                arcface_loss=arcface_loss,
+                loss_fn=loss_fn,
                 model_optimizer=model_optimizer,
                 loss_optimizer=loss_optimizer,
                 model_scheduler=model_scheduler,
@@ -175,6 +184,7 @@ def run_training(
                 class_to_idx=train_dataset.class_to_idx,
                 config=config,
                 metrics=epoch_metrics,
+                best_top1=best_top1,
             )
 
             print(
